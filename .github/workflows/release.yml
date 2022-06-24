@@ -1,23 +1,12 @@
-# Terraform Provider release workflow.
 name: Release
 
-# This GitHub action creates a release when a tag that matches the pattern
-# "v*" (e.g. v0.1.0) is created.
 on:
   push:
     tags:
       - 'v*'
 
-# Releases need permissions to read and write the repository contents.
-# GitHub considers creating releases and uploading assets as writing contents.
 permissions:
   contents: write
-
-# Default values to simplify job configurations below.
-env:
-  # Go language version to use for building. This value should also be updated
-  # in the testing workflow if changed.
-  GO_VERSION: '1.17'
 
 jobs:
   goreleaser:
@@ -29,7 +18,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v3
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: 'go.mod'
       # This uses an action (hashicorp/ghaction-import-gpg) that assumes you set your 
       # private key in the `GPG_PRIVATE_KEY` secret and passphrase in the `PASSPHRASE`
       # secret. If you would rather own your own GPG handling, please fork this action
