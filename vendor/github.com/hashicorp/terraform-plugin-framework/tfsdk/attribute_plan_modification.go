@@ -8,7 +8,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	"github.com/hashicorp/terraform-plugin-framework/internal/totftypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 )
 
 // AttributePlanModifier represents a modifier for an attribute at plan time.
@@ -128,7 +129,20 @@ func (r RequiresReplaceModifier) Modify(ctx context.Context, req ModifyAttribute
 		return
 	}
 
-	attrSchema, err := req.State.Schema.AttributeAtPath(req.AttributePath)
+	// TODO: Remove after schema refactoring, Attribute is exposed in
+	// ModifyAttributePlanRequest, or Computed is exposed in
+	// ModifyAttributePlanRequest.
+	// Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/365
+	// Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/389
+	tftypesPath, diags := totftypes.AttributePath(ctx, req.AttributePath)
+
+	resp.Diagnostics.Append(diags...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	attrSchema, err := req.State.Schema.AttributeAtPath(tftypesPath)
 
 	// Path may lead to block instead of attribute. Blocks cannot be Computed.
 	// If ErrPathIsBlock, attrSchema.Computed will still be false later.
@@ -206,7 +220,7 @@ func RequiresReplaceIf(f RequiresReplaceIfFunc, description, markdownDescription
 
 // RequiresReplaceIfFunc is a conditional function used in the RequiresReplaceIf
 // plan modifier to determine whether the attribute requires replacement.
-type RequiresReplaceIfFunc func(ctx context.Context, state, config attr.Value, path *tftypes.AttributePath) (bool, diag.Diagnostics)
+type RequiresReplaceIfFunc func(ctx context.Context, state, config attr.Value, path path.Path) (bool, diag.Diagnostics)
 
 // RequiresReplaceIfModifier is an AttributePlanModifier that sets RequiresReplace
 // on the attribute if the conditional function returns true.
@@ -260,7 +274,20 @@ func (r RequiresReplaceIfModifier) Modify(ctx context.Context, req ModifyAttribu
 		return
 	}
 
-	attrSchema, err := req.State.Schema.AttributeAtPath(req.AttributePath)
+	// TODO: Remove after schema refactoring, Attribute is exposed in
+	// ModifyAttributePlanRequest, or Computed is exposed in
+	// ModifyAttributePlanRequest.
+	// Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/365
+	// Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/389
+	tftypesPath, diags := totftypes.AttributePath(ctx, req.AttributePath)
+
+	resp.Diagnostics.Append(diags...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	attrSchema, err := req.State.Schema.AttributeAtPath(tftypesPath)
 
 	// Path may lead to block instead of attribute. Blocks cannot be Computed.
 	// If ErrPathIsBlock, attrSchema.Computed will still be false later.
@@ -362,8 +389,13 @@ func (r UseStateForUnknownModifier) MarkdownDescription(ctx context.Context) str
 // instance of this request struct is supplied as an argument to the Modify
 // function of an attribute's plan modifier(s).
 type ModifyAttributePlanRequest struct {
-	// AttributePath is the path of the attribute.
-	AttributePath *tftypes.AttributePath
+	// AttributePath is the path of the attribute. Use this path for any
+	// response diagnostics.
+	AttributePath path.Path
+
+	// AttributePathExpression is the expression matching the exact path of the
+	// attribute.
+	AttributePathExpression path.Expression
 
 	// Config is the configuration the user supplied for the resource.
 	Config Config
