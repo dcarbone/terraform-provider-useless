@@ -47,8 +47,9 @@ func BlockValidate(ctx context.Context, b tfsdk.Block, req tfsdk.ValidateAttribu
 		for idx := range l.Elems {
 			for name, attr := range b.Attributes {
 				nestedAttrReq := tfsdk.ValidateAttributeRequest{
-					AttributePath: req.AttributePath.WithElementKeyInt(idx).WithAttributeName(name),
-					Config:        req.Config,
+					AttributePath:           req.AttributePath.AtListIndex(idx).AtName(name),
+					AttributePathExpression: req.AttributePathExpression.AtListIndex(idx).AtName(name),
+					Config:                  req.Config,
 				}
 				nestedAttrResp := &tfsdk.ValidateAttributeResponse{
 					Diagnostics: resp.Diagnostics,
@@ -61,8 +62,9 @@ func BlockValidate(ctx context.Context, b tfsdk.Block, req tfsdk.ValidateAttribu
 
 			for name, block := range b.Blocks {
 				nestedAttrReq := tfsdk.ValidateAttributeRequest{
-					AttributePath: req.AttributePath.WithElementKeyInt(idx).WithAttributeName(name),
-					Config:        req.Config,
+					AttributePath:           req.AttributePath.AtListIndex(idx).AtName(name),
+					AttributePathExpression: req.AttributePathExpression.AtListIndex(idx).AtName(name),
+					Config:                  req.Config,
 				}
 				nestedAttrResp := &tfsdk.ValidateAttributeResponse{
 					Diagnostics: resp.Diagnostics,
@@ -88,22 +90,11 @@ func BlockValidate(ctx context.Context, b tfsdk.Block, req tfsdk.ValidateAttribu
 		}
 
 		for _, value := range s.Elems {
-			tfValue, err := value.ToTerraformValue(ctx)
-			if err != nil {
-				err := fmt.Errorf("error running ToTerraformValue on element value: %v", value)
-				resp.Diagnostics.AddAttributeError(
-					req.AttributePath,
-					"Block Validation Error",
-					"Block validation cannot convert element into a Terraform value. Report this to the provider developer:\n\n"+err.Error(),
-				)
-
-				return
-			}
-
 			for name, attr := range b.Attributes {
 				nestedAttrReq := tfsdk.ValidateAttributeRequest{
-					AttributePath: req.AttributePath.WithElementKeyValue(tfValue).WithAttributeName(name),
-					Config:        req.Config,
+					AttributePath:           req.AttributePath.AtSetValue(value).AtName(name),
+					AttributePathExpression: req.AttributePathExpression.AtSetValue(value).AtName(name),
+					Config:                  req.Config,
 				}
 				nestedAttrResp := &tfsdk.ValidateAttributeResponse{
 					Diagnostics: resp.Diagnostics,
@@ -116,8 +107,9 @@ func BlockValidate(ctx context.Context, b tfsdk.Block, req tfsdk.ValidateAttribu
 
 			for name, block := range b.Blocks {
 				nestedAttrReq := tfsdk.ValidateAttributeRequest{
-					AttributePath: req.AttributePath.WithElementKeyValue(tfValue).WithAttributeName(name),
-					Config:        req.Config,
+					AttributePath:           req.AttributePath.AtSetValue(value).AtName(name),
+					AttributePathExpression: req.AttributePathExpression.AtSetValue(value).AtName(name),
+					Config:                  req.Config,
 				}
 				nestedAttrResp := &tfsdk.ValidateAttributeResponse{
 					Diagnostics: resp.Diagnostics,

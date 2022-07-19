@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // ValidateSchemaRequest repesents a request for validating a Schema.
@@ -36,8 +36,9 @@ func SchemaValidate(ctx context.Context, s tfsdk.Schema, req ValidateSchemaReque
 	for name, attribute := range s.Attributes {
 
 		attributeReq := tfsdk.ValidateAttributeRequest{
-			AttributePath: tftypes.NewAttributePath().WithAttributeName(name),
-			Config:        req.Config,
+			AttributePath:           path.Root(name),
+			AttributePathExpression: path.MatchRoot(name),
+			Config:                  req.Config,
 		}
 		attributeResp := &tfsdk.ValidateAttributeResponse{
 			Diagnostics: resp.Diagnostics,
@@ -50,8 +51,9 @@ func SchemaValidate(ctx context.Context, s tfsdk.Schema, req ValidateSchemaReque
 
 	for name, block := range s.Blocks {
 		attributeReq := tfsdk.ValidateAttributeRequest{
-			AttributePath: tftypes.NewAttributePath().WithAttributeName(name),
-			Config:        req.Config,
+			AttributePath:           path.Root(name),
+			AttributePathExpression: path.MatchRoot(name),
+			Config:                  req.Config,
 		}
 		attributeResp := &tfsdk.ValidateAttributeResponse{
 			Diagnostics: resp.Diagnostics,
