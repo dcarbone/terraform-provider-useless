@@ -3,15 +3,18 @@ package fromproto6
 import (
 	"context"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/internal/fwserver"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwschema"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwserver"
+	"github.com/hashicorp/terraform-plugin-framework/internal/privatestate"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
 )
 
 // PlanResourceChangeRequest returns the *fwserver.PlanResourceChangeRequest
 // equivalent of a *tfprotov6.PlanResourceChangeRequest.
-func PlanResourceChangeRequest(ctx context.Context, proto6 *tfprotov6.PlanResourceChangeRequest, resourceType tfsdk.ResourceType, resourceSchema *tfsdk.Schema, providerMetaSchema *tfsdk.Schema) (*fwserver.PlanResourceChangeRequest, diag.Diagnostics) {
+func PlanResourceChangeRequest(ctx context.Context, proto6 *tfprotov6.PlanResourceChangeRequest, resourceType provider.ResourceType, resourceSchema fwschema.Schema, providerMetaSchema fwschema.Schema) (*fwserver.PlanResourceChangeRequest, diag.Diagnostics) {
 	if proto6 == nil {
 		return nil, nil
 	}
@@ -33,8 +36,7 @@ func PlanResourceChangeRequest(ctx context.Context, proto6 *tfprotov6.PlanResour
 	}
 
 	fw := &fwserver.PlanResourceChangeRequest{
-		PriorPrivate:   proto6.PriorPrivate,
-		ResourceSchema: *resourceSchema,
+		ResourceSchema: resourceSchema,
 		ResourceType:   resourceType,
 	}
 
@@ -61,6 +63,12 @@ func PlanResourceChangeRequest(ctx context.Context, proto6 *tfprotov6.PlanResour
 	diags.Append(providerMetaDiags...)
 
 	fw.ProviderMeta = providerMeta
+
+	privateData, privateDataDiags := privatestate.NewData(ctx, proto6.PriorPrivate)
+
+	diags.Append(privateDataDiags...)
+
+	fw.PriorPrivate = privateData
 
 	return fw, diags
 }

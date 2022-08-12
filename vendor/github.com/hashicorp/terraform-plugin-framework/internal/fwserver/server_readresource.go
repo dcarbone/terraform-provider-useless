@@ -5,6 +5,9 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
+	"github.com/hashicorp/terraform-plugin-framework/internal/privatestate"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 )
 
@@ -12,8 +15,8 @@ import (
 // ReadResource RPC.
 type ReadResourceRequest struct {
 	CurrentState *tfsdk.State
-	ResourceType tfsdk.ResourceType
-	Private      []byte
+	ResourceType provider.ResourceType
+	Private      *privatestate.Data
 	ProviderMeta *tfsdk.Config
 }
 
@@ -22,7 +25,7 @@ type ReadResourceRequest struct {
 type ReadResourceResponse struct {
 	Diagnostics diag.Diagnostics
 	NewState    *tfsdk.State
-	Private     []byte
+	Private     *privatestate.Data
 }
 
 // ReadResource implements the framework server ReadResource RPC.
@@ -43,7 +46,7 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 
 	// Always instantiate new Resource instances.
 	logging.FrameworkDebug(ctx, "Calling provider defined ResourceType NewResource")
-	resource, diags := req.ResourceType.NewResource(ctx, s.Provider)
+	resourceImpl, diags := req.ResourceType.NewResource(ctx, s.Provider)
 	logging.FrameworkDebug(ctx, "Called provider defined ResourceType NewResource")
 
 	resp.Diagnostics.Append(diags...)
@@ -52,13 +55,13 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 		return
 	}
 
-	readReq := tfsdk.ReadResourceRequest{
+	readReq := resource.ReadRequest{
 		State: tfsdk.State{
 			Schema: req.CurrentState.Schema,
 			Raw:    req.CurrentState.Raw.Copy(),
 		},
 	}
-	readResp := tfsdk.ReadResourceResponse{
+	readResp := resource.ReadResponse{
 		State: tfsdk.State{
 			Schema: req.CurrentState.Schema,
 			Raw:    req.CurrentState.Raw.Copy(),
@@ -69,10 +72,32 @@ func (s *Server) ReadResource(ctx context.Context, req *ReadResourceRequest, res
 		readReq.ProviderMeta = *req.ProviderMeta
 	}
 
+	privateProviderData := privatestate.EmptyProviderData(ctx)
+
+	readReq.Private = privateProviderData
+	readResp.Private = privateProviderData
+
+	if req.Private != nil {
+		if req.Private.Provider != nil {
+			readReq.Private = req.Private.Provider
+			readResp.Private = req.Private.Provider
+		}
+
+		resp.Private = req.Private
+	}
+
 	logging.FrameworkDebug(ctx, "Calling provider defined Resource Read")
-	resource.Read(ctx, readReq, &readResp)
+	resourceImpl.Read(ctx, readReq, &readResp)
 	logging.FrameworkDebug(ctx, "Called provider defined Resource Read")
 
 	resp.Diagnostics = readResp.Diagnostics
 	resp.NewState = &readResp.State
+
+	if readResp.Private != nil {
+		if resp.Private == nil {
+			resp.Private = &privatestate.Data{}
+		}
+
+		resp.Private.Provider = readResp.Private
+	}
 }
