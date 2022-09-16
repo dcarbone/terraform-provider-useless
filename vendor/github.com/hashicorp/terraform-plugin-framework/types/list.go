@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/reflect"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -45,7 +47,7 @@ func (l ListType) TerraformType(ctx context.Context) tftypes.Type {
 	}
 }
 
-// ValueFromTerraform returns an AttributeValue given a tftypes.Value.
+// ValueFromTerraform returns an attr.Value given a tftypes.Value.
 // This is meant to convert the tftypes.Value into a more convenient Go
 // type for the provider to consume the data with.
 func (l ListType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
@@ -111,12 +113,61 @@ func (l ListType) String() string {
 	return "types.ListType[" + l.ElemType.String() + "]"
 }
 
-// List represents a list of AttributeValues, all of the same type, indicated
+// Validate validates all elements of the list that are of type
+// xattr.TypeWithValidate.
+func (l ListType) Validate(ctx context.Context, in tftypes.Value, path path.Path) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if in.Type() == nil {
+		return diags
+	}
+
+	if !in.Type().Is(tftypes.List{}) {
+		err := fmt.Errorf("expected List value, received %T with value: %v", in, in)
+		diags.AddAttributeError(
+			path,
+			"List Type Validation Error",
+			"An unexpected error was encountered trying to validate an attribute value. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+		)
+		return diags
+	}
+
+	if !in.IsKnown() || in.IsNull() {
+		return diags
+	}
+
+	var elems []tftypes.Value
+
+	if err := in.As(&elems); err != nil {
+		diags.AddAttributeError(
+			path,
+			"List Type Validation Error",
+			"An unexpected error was encountered trying to validate an attribute value. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+		)
+		return diags
+	}
+
+	validatableType, isValidatable := l.ElemType.(xattr.TypeWithValidate)
+	if !isValidatable {
+		return diags
+	}
+
+	for index, elem := range elems {
+		if !elem.IsFullyKnown() {
+			continue
+		}
+		diags = append(diags, validatableType.Validate(ctx, elem, path.AtListIndex(index))...)
+	}
+
+	return diags
+}
+
+// List represents a list of attr.Values, all of the same type, indicated
 // by ElemType.
 type List struct {
 	// Unknown will be set to true if the entire list is an unknown value.
 	// If only some of the elements in the list are unknown, their known or
-	// unknown status will be represented however that AttributeValue
+	// unknown status will be represented however that attr.Value
 	// surfaces that information. The List's Unknown property only tracks
 	// if the number of elements in a List is known, not whether the
 	// elements that are in the list are known.
@@ -160,8 +211,7 @@ func (l List) Type(ctx context.Context) attr.Type {
 	return ListType{ElemType: l.ElemType}
 }
 
-// ToTerraformValue returns the data contained in the AttributeValue as
-// a tftypes.Value.
+// ToTerraformValue returns the data contained in the List as a tftypes.Value.
 func (l List) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	if l.ElemType == nil {
 		return tftypes.Value{}, fmt.Errorf("cannot convert List to tftypes.Value if ElemType field is not set")
@@ -187,8 +237,8 @@ func (l List) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	return tftypes.NewValue(listType, vals), nil
 }
 
-// Equal must return true if the AttributeValue is considered
-// semantically equal to the AttributeValue passed as an argument.
+// Equal returns true if the List is considered semantically equal
+// (same type and same value) to the attr.Value passed as an argument.
 func (l List) Equal(o attr.Value) bool {
 	other, ok := o.(List)
 	if !ok {
@@ -218,14 +268,19 @@ func (l List) Equal(o attr.Value) bool {
 	return true
 }
 
+// IsNull returns true if the List represents a null value.
 func (l List) IsNull() bool {
 	return l.Null
 }
 
+// IsUnknown returns true if the List represents a currently unknown value.
 func (l List) IsUnknown() bool {
 	return l.Unknown
 }
 
+// String returns a human-readable representation of the List value.
+// The string returned here is not protected by any compatibility guarantees,
+// and is intended for logging and error reporting.
 func (l List) String() string {
 	if l.Unknown {
 		return attr.UnknownValueString

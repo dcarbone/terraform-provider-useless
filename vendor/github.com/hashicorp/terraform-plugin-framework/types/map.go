@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/reflect"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -46,7 +48,7 @@ func (m MapType) TerraformType(ctx context.Context) tftypes.Type {
 	}
 }
 
-// ValueFromTerraform returns an AttributeValue given a tftypes.Value. This is
+// ValueFromTerraform returns an attr.Value given a tftypes.Value. This is
 // meant to convert the tftypes.Value into a more convenient Go type for the
 // provider to consume the data with.
 func (m MapType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
@@ -115,12 +117,61 @@ func (m MapType) String() string {
 	return "types.MapType[" + m.ElemType.String() + "]"
 }
 
-// Map represents a map of AttributeValues, all of the same type, indicated by
+// Validate validates all elements of the map that are of type
+// xattr.TypeWithValidate.
+func (m MapType) Validate(ctx context.Context, in tftypes.Value, path path.Path) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if in.Type() == nil {
+		return diags
+	}
+
+	if !in.Type().Is(tftypes.Map{}) {
+		err := fmt.Errorf("expected Map value, received %T with value: %v", in, in)
+		diags.AddAttributeError(
+			path,
+			"Map Type Validation Error",
+			"An unexpected error was encountered trying to validate an attribute value. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+		)
+		return diags
+	}
+
+	if !in.IsKnown() || in.IsNull() {
+		return diags
+	}
+
+	var elems map[string]tftypes.Value
+
+	if err := in.As(&elems); err != nil {
+		diags.AddAttributeError(
+			path,
+			"Map Type Validation Error",
+			"An unexpected error was encountered trying to validate an attribute value. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+		)
+		return diags
+	}
+
+	validatableType, isValidatable := m.ElemType.(xattr.TypeWithValidate)
+	if !isValidatable {
+		return diags
+	}
+
+	for index, elem := range elems {
+		if !elem.IsFullyKnown() {
+			continue
+		}
+		diags = append(diags, validatableType.Validate(ctx, elem, path.AtMapKey(index))...)
+	}
+
+	return diags
+}
+
+// Map represents a map of attr.Values, all of the same type, indicated by
 // ElemType. Keys for the map will always be strings.
 type Map struct {
 	// Unknown will be set to true if the entire map is an unknown value.
 	// If only some of the elements in the map are unknown, their known or
-	// unknown status will be represented however that AttributeValue
+	// unknown status will be represented however that attr.Value
 	// surfaces that information. The Map's Unknown property only tracks if
 	// the number of elements in a Map is known, not whether the elements
 	// that are in the map are known.
@@ -165,8 +216,7 @@ func (m Map) Type(ctx context.Context) attr.Type {
 	return MapType{ElemType: m.ElemType}
 }
 
-// ToTerraformValue returns the data contained in the AttributeValue as a
-// tftypes.Value.
+// ToTerraformValue returns the data contained in the List as a tftypes.Value.
 func (m Map) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	if m.ElemType == nil {
 		return tftypes.Value{}, fmt.Errorf("cannot convert Map to tftypes.Value if ElemType field is not set")
@@ -192,8 +242,8 @@ func (m Map) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	return tftypes.NewValue(mapType, vals), nil
 }
 
-// Equal must return true if the AttributeValue is considered semantically
-// equal to the AttributeValue passed as an argument.
+// Equal returns true if the Map is considered semantically equal
+// (same type and same value) to the attr.Value passed as an argument.
 func (m Map) Equal(o attr.Value) bool {
 	other, ok := o.(Map)
 	if !ok {
@@ -223,14 +273,19 @@ func (m Map) Equal(o attr.Value) bool {
 	return true
 }
 
+// IsNull returns true if the Map represents a null value.
 func (m Map) IsNull() bool {
 	return m.Null
 }
 
+// IsUnknown returns true if the Map represents a currently unknown value.
 func (m Map) IsUnknown() bool {
 	return m.Unknown
 }
 
+// String returns a human-readable representation of the Map value.
+// The string returned here is not protected by any compatibility guarantees,
+// and is intended for logging and error reporting.
 func (m Map) String() string {
 	if m.Unknown {
 		return attr.UnknownValueString
