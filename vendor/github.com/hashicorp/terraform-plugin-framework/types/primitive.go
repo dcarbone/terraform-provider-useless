@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -29,11 +31,11 @@ const (
 )
 
 var (
-	_ attr.Type             = StringType
-	_ attr.Type             = NumberType
-	_ attr.Type             = BoolType
-	_ attr.TypeWithValidate = Int64Type
-	_ attr.TypeWithValidate = Float64Type
+	_ attr.Type              = StringType
+	_ attr.Type              = NumberType
+	_ attr.Type              = BoolType
+	_ xattr.TypeWithValidate = Int64Type
+	_ xattr.TypeWithValidate = Float64Type
 )
 
 func (p primitive) String() string {
@@ -90,6 +92,25 @@ func (p primitive) ValueFromTerraform(ctx context.Context, in tftypes.Value) (at
 	}
 }
 
+// ValueType returns the Value type.
+func (p primitive) ValueType(_ context.Context) attr.Value {
+	// These Value do not need to be valid.
+	switch p {
+	case BoolType:
+		return Bool{}
+	case Float64Type:
+		return Float64{}
+	case Int64Type:
+		return Int64{}
+	case NumberType:
+		return Number{}
+	case StringType:
+		return String{}
+	default:
+		panic(fmt.Sprintf("unknown primitive %d", p))
+	}
+}
+
 // Equal returns true if `o` is also a primitive, and is the same type of
 // primitive as `p`.
 func (p primitive) Equal(o attr.Type) bool {
@@ -113,7 +134,7 @@ func (p primitive) ApplyTerraform5AttributePathStep(step tftypes.AttributePathSt
 }
 
 // Validate implements type validation.
-func (p primitive) Validate(ctx context.Context, in tftypes.Value, path *tftypes.AttributePath) diag.Diagnostics {
+func (p primitive) Validate(ctx context.Context, in tftypes.Value, path path.Path) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	switch p {

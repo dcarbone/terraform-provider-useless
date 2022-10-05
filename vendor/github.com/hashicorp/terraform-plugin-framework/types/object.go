@@ -9,6 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/reflect"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -50,7 +52,7 @@ func (o ObjectType) TerraformType(ctx context.Context) tftypes.Type {
 	}
 }
 
-// ValueFromTerraform returns an AttributeValue given a tftypes.Value.
+// ValueFromTerraform returns an attr.Value given a tftypes.Value.
 // This is meant to convert the tftypes.Value into a more convenient Go
 // type for the provider to consume the data with.
 func (o ObjectType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
@@ -143,11 +145,18 @@ func (o ObjectType) String() string {
 	return res.String()
 }
 
+// ValueType returns the Value type.
+func (t ObjectType) ValueType(_ context.Context) attr.Value {
+	return Object{
+		AttrTypes: t.AttrTypes,
+	}
+}
+
 // Object represents an object
 type Object struct {
 	// Unknown will be set to true if the entire object is an unknown value.
 	// If only some of the elements in the object are unknown, their known or
-	// unknown status will be represented however that AttributeValue
+	// unknown status will be represented however that attr.Value
 	// surfaces that information. The Object's Unknown property only tracks
 	// if the number of elements in a Object is known, not whether the
 	// elements that are in the object are known.
@@ -197,7 +206,7 @@ func (o Object) As(ctx context.Context, target interface{}, opts ObjectAsOptions
 	return reflect.Into(ctx, obj, val, target, reflect.Options{
 		UnhandledNullAsEmpty:    opts.UnhandledNullAsEmpty,
 		UnhandledUnknownAsEmpty: opts.UnhandledUnknownAsEmpty,
-	})
+	}, path.Empty())
 }
 
 // Type returns an ObjectType with the same attribute types as `o`.
@@ -205,7 +214,7 @@ func (o Object) Type(_ context.Context) attr.Type {
 	return ObjectType{AttrTypes: o.AttrTypes}
 }
 
-// ToTerraformValue returns the data contained in the AttributeValue as
+// ToTerraformValue returns the data contained in the attr.Value as
 // a tftypes.Value.
 func (o Object) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	if o.AttrTypes == nil {
@@ -237,8 +246,8 @@ func (o Object) ToTerraformValue(ctx context.Context) (tftypes.Value, error) {
 	return tftypes.NewValue(objectType, vals), nil
 }
 
-// Equal must return true if the AttributeValue is considered
-// semantically equal to the AttributeValue passed as an argument.
+// Equal returns true if the Object is considered semantically equal
+// (same type and same value) to the attr.Value passed as an argument.
 func (o Object) Equal(c attr.Value) bool {
 	other, ok := c.(Object)
 	if !ok {
@@ -278,14 +287,19 @@ func (o Object) Equal(c attr.Value) bool {
 	return true
 }
 
+// IsNull returns true if the Object represents a null value.
 func (o Object) IsNull() bool {
 	return o.Null
 }
 
+// IsUnknown returns true if the Object represents a currently unknown value.
 func (o Object) IsUnknown() bool {
 	return o.Unknown
 }
 
+// String returns a human-readable representation of the Object value.
+// The string returned here is not protected by any compatibility guarantees,
+// and is intended for logging and error reporting.
 func (o Object) String() string {
 	if o.Unknown {
 		return attr.UnknownValueString
