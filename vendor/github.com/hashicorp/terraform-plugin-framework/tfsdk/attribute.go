@@ -1,16 +1,30 @@
 package tfsdk
 
 import (
-	"context"
 	"errors"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwschema"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+)
+
+// Attribute must satify the fwschema.Attribute interface. It must also satisfy
+// fwxschema.AttributeWithPlanModifiers and fwxschema.AttributeWithValidators
+// interfaces, however we cannot check that here or it would introduce an
+// import cycle.
+var (
+	_ fwschema.Attribute       = Attribute{}
+	_ fwschema.NestedAttribute = Attribute{}
 )
 
 // Attribute defines the constraints and behaviors of a single value field in a
 // schema. Attributes are the fields that show up in Terraform state files and
 // can be used in configuration files.
+//
+// Deprecated: Use datasource/schema.Attribute, provider/schema.Attribute, or
+// resource/schema.Attribute instead. This can be switched by using the
+// datasource/schema.Schema, provider/schema.Schema, or resource/schema.Schema
+// types.
 type Attribute struct {
 	// Type indicates what kind of attribute this is. You'll most likely
 	// want to use one of the types in the types package.
@@ -23,7 +37,7 @@ type Attribute struct {
 	// type.
 	//
 	// If Attributes is set, Type cannot be.
-	Attributes NestedAttributes
+	Attributes fwschema.NestedAttributes
 
 	// Description is used in various tooling, like the language server, to
 	// give practitioners more information about what this attribute is,
@@ -73,12 +87,52 @@ type Attribute struct {
 	// file is sensitive.
 	Sensitive bool
 
-	// DeprecationMessage defines a message to display to practitioners
-	// using this attribute, warning them that it is deprecated and
-	// instructing them on what upgrade steps to take.
+	// DeprecationMessage defines warning diagnostic details to display when
+	// practitioner configurations use this Attribute. The warning diagnostic
+	// summary is automatically set to "Attribute Deprecated" along with
+	// configuration source file and line information.
+	//
+	// Set this field to a practitioner actionable message such as:
+	//
+	//  - "Configure other_attribute instead. This attribute will be removed
+	//    in the next major version of the provider."
+	//  - "Remove this attribute's configuration as it no longer is used and
+	//    the attribute will be removed in the next major version of the
+	//    provider."
+	//
+	// In Terraform 1.2.7 and later, this warning diagnostic is displayed any
+	// time a practitioner attempts to configure a value for this attribute and
+	// certain scenarios where this attribute is referenced.
+	//
+	// In Terraform 1.2.6 and earlier, this warning diagnostic is only
+	// displayed when the Attribute is Required or Optional, and if the
+	// practitioner configuration sets the value to a known or unknown value
+	// (which may eventually be null). It has no effect when the Attribute is
+	// Computed-only (read-only; not Required or Optional).
+	//
+	// Across any Terraform version, there are no warnings raised for
+	// practitioner configuration values set directly to null, as there is no
+	// way for the framework to differentiate between an unset and null
+	// configuration due to how Terraform sends configuration information
+	// across the protocol.
+	//
+	// Additional information about deprecation enhancements for read-only
+	// attributes can be found in:
+	//
+	//  - https://github.com/hashicorp/terraform/issues/7569
+	//
 	DeprecationMessage string
 
-	// Validators defines validation functionality for the attribute.
+	// Validators define value validation functionality for the attribute. All
+	// elements of the slice of AttributeValidator are run, regardless of any
+	// previous error diagnostics.
+	//
+	// Many common use case validators can be found in the
+	// github.com/hashicorp/terraform-plugin-framework-validators Go module.
+	//
+	// If the Type field points to a custom type that implements the
+	// xattr.TypeWithValidate interface, the validators defined in this field
+	// are run in addition to the validation defined by the type.
 	Validators []AttributeValidator
 
 	// PlanModifiers defines a sequence of modifiers for this attribute at
@@ -113,59 +167,105 @@ func (a Attribute) ApplyTerraform5AttributePathStep(step tftypes.AttributePathSt
 }
 
 // Equal returns true if `a` and `o` should be considered Equal.
-func (a Attribute) Equal(o Attribute) bool {
-	if a.Type == nil && o.Type != nil {
-		return false
-	} else if a.Type != nil && o.Type == nil {
-		return false
-	} else if a.Type != nil && o.Type != nil && !a.Type.Equal(o.Type) {
+func (a Attribute) Equal(o fwschema.Attribute) bool {
+	other, ok := o.(Attribute)
+
+	if !ok {
 		return false
 	}
-	if a.Attributes == nil && o.Attributes != nil {
-		return false
-	} else if a.Attributes != nil && o.Attributes == nil {
-		return false
-	} else if a.Attributes != nil && o.Attributes != nil && !a.Attributes.Equal(o.Attributes) {
+
+	if a.GetNestingMode() != other.GetNestingMode() {
 		return false
 	}
-	if a.Description != o.Description {
+
+	if a.GetNestedObject() != nil && !a.GetNestedObject().Equal(other.GetNestedObject()) {
 		return false
 	}
-	if a.MarkdownDescription != o.MarkdownDescription {
+
+	if other.GetNestedObject() != nil && !other.GetNestedObject().Equal(a.GetNestedObject()) {
 		return false
 	}
-	if a.Required != o.Required {
-		return false
-	}
-	if a.Optional != o.Optional {
-		return false
-	}
-	if a.Computed != o.Computed {
-		return false
-	}
-	if a.Sensitive != o.Sensitive {
-		return false
-	}
-	if a.DeprecationMessage != o.DeprecationMessage {
-		return false
-	}
-	return true
+
+	return fwschema.AttributesEqual(a, o)
 }
 
-// attributeType returns an attr.Type corresponding to the attribute.
-func (a Attribute) attributeType() attr.Type {
+// GetDeprecationMessage satisfies the fwschema.Attribute interface.
+func (a Attribute) GetDeprecationMessage() string {
+	return a.DeprecationMessage
+}
+
+// GetDescription satisfies the fwschema.Attribute interface.
+func (a Attribute) GetDescription() string {
+	return a.Description
+}
+
+// GetMarkdownDescription satisfies the fwschema.Attribute interface.
+func (a Attribute) GetMarkdownDescription() string {
+	return a.MarkdownDescription
+}
+
+// GetNestedObject returns a generated NestedAttributeObject if the
+// Attribute represents nested attributes, otherwise nil.
+func (a Attribute) GetNestedObject() fwschema.NestedAttributeObject {
+	if a.GetNestingMode() == fwschema.NestingModeUnknown {
+		return nil
+	}
+
+	return nestedAttributeObject{
+		Attributes: a.Attributes.GetAttributes(),
+	}
+}
+
+// GetNestingMode returns the Attributes nesting mode, if set. Otherwise,
+// returns NestingModeUnset.
+func (a Attribute) GetNestingMode() fwschema.NestingMode {
+	if a.Type != nil {
+		return fwschema.NestingModeUnknown
+	}
+
 	if a.Attributes != nil {
-		return a.Attributes.AttributeType()
+		return a.Attributes.GetNestingMode()
+	}
+
+	return fwschema.NestingModeUnknown
+}
+
+// GetPlanModifiers satisfies the fwxschema.AttributeWithPlanModifiers
+// interface.
+func (a Attribute) GetPlanModifiers() AttributePlanModifiers {
+	return a.PlanModifiers
+}
+
+// GetValidators satisfies the fwxschema.AttributeWithValidators interface.
+func (a Attribute) GetValidators() []AttributeValidator {
+	return a.Validators
+}
+
+// GetType satisfies the fwschema.Attribute interface.
+func (a Attribute) GetType() attr.Type {
+	if a.Attributes != nil {
+		return a.Attributes.Type()
 	}
 
 	return a.Type
 }
 
-// terraformType returns an tftypes.Type corresponding to the attribute.
-func (a Attribute) terraformType(ctx context.Context) tftypes.Type {
-	if a.Attributes != nil {
-		return a.Attributes.AttributeType().TerraformType(ctx)
-	}
+// IsComputed satisfies the fwschema.Attribute interface.
+func (a Attribute) IsComputed() bool {
+	return a.Computed
+}
 
-	return a.Type.TerraformType(ctx)
+// IsOptional satisfies the fwschema.Attribute interface.
+func (a Attribute) IsOptional() bool {
+	return a.Optional
+}
+
+// IsRequired satisfies the fwschema.Attribute interface.
+func (a Attribute) IsRequired() bool {
+	return a.Required
+}
+
+// IsSensitive satisfies the fwschema.Attribute interface.
+func (a Attribute) IsSensitive() bool {
+	return a.Sensitive
 }
