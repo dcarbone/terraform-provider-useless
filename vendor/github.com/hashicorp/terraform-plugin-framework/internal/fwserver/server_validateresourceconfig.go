@@ -5,14 +5,15 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 )
 
 // ValidateResourceConfigRequest is the framework server request for the
 // ValidateResourceConfig RPC.
 type ValidateResourceConfigRequest struct {
-	Config       *tfsdk.Config
-	ResourceType tfsdk.ResourceType
+	Config   *tfsdk.Config
+	Resource resource.Resource
 }
 
 // ValidateResourceConfigResponse is the framework server response for the
@@ -27,28 +28,36 @@ func (s *Server) ValidateResourceConfig(ctx context.Context, req *ValidateResour
 		return
 	}
 
-	// Always instantiate new Resource instances.
-	logging.FrameworkDebug(ctx, "Calling provider defined ResourceType NewResource")
-	resource, diags := req.ResourceType.NewResource(ctx, s.Provider)
-	logging.FrameworkDebug(ctx, "Called provider defined ResourceType NewResource")
+	if _, ok := req.Resource.(resource.ResourceWithConfigure); ok {
+		logging.FrameworkTrace(ctx, "Resource implements ResourceWithConfigure")
 
-	resp.Diagnostics.Append(diags...)
+		configureReq := resource.ConfigureRequest{
+			ProviderData: s.ResourceConfigureData,
+		}
+		configureResp := resource.ConfigureResponse{}
 
-	if resp.Diagnostics.HasError() {
-		return
+		logging.FrameworkDebug(ctx, "Calling provider defined Resource Configure")
+		req.Resource.(resource.ResourceWithConfigure).Configure(ctx, configureReq, &configureResp)
+		logging.FrameworkDebug(ctx, "Called provider defined Resource Configure")
+
+		resp.Diagnostics.Append(configureResp.Diagnostics...)
+
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
-	vdscReq := tfsdk.ValidateResourceConfigRequest{
+	vdscReq := resource.ValidateConfigRequest{
 		Config: *req.Config,
 	}
 
-	if resource, ok := resource.(tfsdk.ResourceWithConfigValidators); ok {
+	if resourceWithConfigValidators, ok := req.Resource.(resource.ResourceWithConfigValidators); ok {
 		logging.FrameworkTrace(ctx, "Resource implements ResourceWithConfigValidators")
 
-		for _, configValidator := range resource.ConfigValidators(ctx) {
-			vdscResp := &tfsdk.ValidateResourceConfigResponse{
-				Diagnostics: resp.Diagnostics,
-			}
+		for _, configValidator := range resourceWithConfigValidators.ConfigValidators(ctx) {
+			// Instantiate a new response for each request to prevent validators
+			// from modifying or removing diagnostics.
+			vdscResp := &resource.ValidateConfigResponse{}
 
 			logging.FrameworkDebug(
 				ctx,
@@ -57,7 +66,7 @@ func (s *Server) ValidateResourceConfig(ctx context.Context, req *ValidateResour
 					logging.KeyDescription: configValidator.Description(ctx),
 				},
 			)
-			configValidator.Validate(ctx, vdscReq, vdscResp)
+			configValidator.ValidateResource(ctx, vdscReq, vdscResp)
 			logging.FrameworkDebug(
 				ctx,
 				"Called provider defined ResourceConfigValidator",
@@ -66,32 +75,32 @@ func (s *Server) ValidateResourceConfig(ctx context.Context, req *ValidateResour
 				},
 			)
 
-			resp.Diagnostics = vdscResp.Diagnostics
+			resp.Diagnostics.Append(vdscResp.Diagnostics...)
 		}
 	}
 
-	if resource, ok := resource.(tfsdk.ResourceWithValidateConfig); ok {
+	if resourceWithValidateConfig, ok := req.Resource.(resource.ResourceWithValidateConfig); ok {
 		logging.FrameworkTrace(ctx, "Resource implements ResourceWithValidateConfig")
 
-		vdscResp := &tfsdk.ValidateResourceConfigResponse{
-			Diagnostics: resp.Diagnostics,
-		}
+		// Instantiate a new response for each request to prevent validators
+		// from modifying or removing diagnostics.
+		vdscResp := &resource.ValidateConfigResponse{}
 
 		logging.FrameworkDebug(ctx, "Calling provider defined Resource ValidateConfig")
-		resource.ValidateConfig(ctx, vdscReq, vdscResp)
+		resourceWithValidateConfig.ValidateConfig(ctx, vdscReq, vdscResp)
 		logging.FrameworkDebug(ctx, "Called provider defined Resource ValidateConfig")
 
-		resp.Diagnostics = vdscResp.Diagnostics
+		resp.Diagnostics.Append(vdscResp.Diagnostics...)
 	}
 
 	validateSchemaReq := ValidateSchemaRequest{
 		Config: *req.Config,
 	}
-	validateSchemaResp := ValidateSchemaResponse{
-		Diagnostics: resp.Diagnostics,
-	}
+	// Instantiate a new response for each request to prevent validators
+	// from modifying or removing diagnostics.
+	validateSchemaResp := ValidateSchemaResponse{}
 
 	SchemaValidate(ctx, req.Config.Schema, validateSchemaReq, &validateSchemaResp)
 
-	resp.Diagnostics = validateSchemaResp.Diagnostics
+	resp.Diagnostics.Append(validateSchemaResp.Diagnostics...)
 }

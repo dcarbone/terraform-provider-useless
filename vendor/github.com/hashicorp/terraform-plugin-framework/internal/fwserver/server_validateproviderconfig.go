@@ -5,6 +5,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/logging"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 )
 
@@ -27,62 +28,62 @@ func (s *Server) ValidateProviderConfig(ctx context.Context, req *ValidateProvid
 		return
 	}
 
-	vpcReq := tfsdk.ValidateProviderConfigRequest{
+	vpcReq := provider.ValidateConfigRequest{
 		Config: *req.Config,
 	}
 
-	if provider, ok := s.Provider.(tfsdk.ProviderWithConfigValidators); ok {
+	if providerWithConfigValidators, ok := s.Provider.(provider.ProviderWithConfigValidators); ok {
 		logging.FrameworkTrace(ctx, "Provider implements ProviderWithConfigValidators")
 
-		for _, configValidator := range provider.ConfigValidators(ctx) {
-			vpcRes := &tfsdk.ValidateProviderConfigResponse{
-				Diagnostics: resp.Diagnostics,
-			}
+		for _, configValidator := range providerWithConfigValidators.ConfigValidators(ctx) {
+			// Instantiate a new response for each request to prevent validators
+			// from modifying or removing diagnostics.
+			vpcRes := &provider.ValidateConfigResponse{}
 
 			logging.FrameworkDebug(
 				ctx,
-				"Calling provider defined ProviderConfigValidator",
+				"Calling provider defined ConfigValidator",
 				map[string]interface{}{
 					logging.KeyDescription: configValidator.Description(ctx),
 				},
 			)
-			configValidator.Validate(ctx, vpcReq, vpcRes)
+			configValidator.ValidateProvider(ctx, vpcReq, vpcRes)
 			logging.FrameworkDebug(
 				ctx,
-				"Called provider defined ProviderConfigValidator",
+				"Called provider defined ConfigValidator",
 				map[string]interface{}{
 					logging.KeyDescription: configValidator.Description(ctx),
 				},
 			)
 
-			resp.Diagnostics = vpcRes.Diagnostics
+			resp.Diagnostics.Append(vpcRes.Diagnostics...)
 		}
 	}
 
-	if provider, ok := s.Provider.(tfsdk.ProviderWithValidateConfig); ok {
+	if providerWithValidateConfig, ok := s.Provider.(provider.ProviderWithValidateConfig); ok {
 		logging.FrameworkTrace(ctx, "Provider implements ProviderWithValidateConfig")
 
-		vpcRes := &tfsdk.ValidateProviderConfigResponse{
-			Diagnostics: resp.Diagnostics,
-		}
+		// Instantiate a new response for each request to prevent validators
+		// from modifying or removing diagnostics.
+		vpcRes := &provider.ValidateConfigResponse{}
 
 		logging.FrameworkDebug(ctx, "Calling provider defined Provider ValidateConfig")
-		provider.ValidateConfig(ctx, vpcReq, vpcRes)
+		providerWithValidateConfig.ValidateConfig(ctx, vpcReq, vpcRes)
 		logging.FrameworkDebug(ctx, "Called provider defined Provider ValidateConfig")
 
-		resp.Diagnostics = vpcRes.Diagnostics
+		resp.Diagnostics.Append(vpcRes.Diagnostics...)
 	}
 
 	validateSchemaReq := ValidateSchemaRequest{
 		Config: *req.Config,
 	}
-	validateSchemaResp := ValidateSchemaResponse{
-		Diagnostics: resp.Diagnostics,
-	}
+	// Instantiate a new response for each request to prevent validators
+	// from modifying or removing diagnostics.
+	validateSchemaResp := ValidateSchemaResponse{}
 
 	SchemaValidate(ctx, req.Config.Schema, validateSchemaReq, &validateSchemaResp)
 
-	resp.Diagnostics = validateSchemaResp.Diagnostics
+	resp.Diagnostics.Append(validateSchemaResp.Diagnostics...)
 
 	// This RPC allows a modified configuration to be returned. This was
 	// previously used to allow a "required" provider attribute (as defined

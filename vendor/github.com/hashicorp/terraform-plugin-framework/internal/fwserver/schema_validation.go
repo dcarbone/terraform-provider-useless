@@ -4,8 +4,9 @@ import (
 	"context"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/internal/fwschema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // ValidateSchemaRequest repesents a request for validating a Schema.
@@ -32,40 +33,42 @@ type ValidateSchemaResponse struct {
 // The extra Schema parameter is a carry-over of creating the proto6server
 // package from the tfsdk package and not wanting to export the method.
 // Reference: https://github.com/hashicorp/terraform-plugin-framework/issues/365
-func SchemaValidate(ctx context.Context, s tfsdk.Schema, req ValidateSchemaRequest, resp *ValidateSchemaResponse) {
-	for name, attribute := range s.Attributes {
+func SchemaValidate(ctx context.Context, s fwschema.Schema, req ValidateSchemaRequest, resp *ValidateSchemaResponse) {
+	for name, attribute := range s.GetAttributes() {
 
-		attributeReq := tfsdk.ValidateAttributeRequest{
-			AttributePath: tftypes.NewAttributePath().WithAttributeName(name),
-			Config:        req.Config,
+		attributeReq := ValidateAttributeRequest{
+			AttributePath:           path.Root(name),
+			AttributePathExpression: path.MatchRoot(name),
+			Config:                  req.Config,
 		}
-		attributeResp := &tfsdk.ValidateAttributeResponse{
-			Diagnostics: resp.Diagnostics,
-		}
+		// Instantiate a new response for each request to prevent validators
+		// from modifying or removing diagnostics.
+		attributeResp := &ValidateAttributeResponse{}
 
 		AttributeValidate(ctx, attribute, attributeReq, attributeResp)
 
-		resp.Diagnostics = attributeResp.Diagnostics
+		resp.Diagnostics.Append(attributeResp.Diagnostics...)
 	}
 
-	for name, block := range s.Blocks {
-		attributeReq := tfsdk.ValidateAttributeRequest{
-			AttributePath: tftypes.NewAttributePath().WithAttributeName(name),
-			Config:        req.Config,
+	for name, block := range s.GetBlocks() {
+		attributeReq := ValidateAttributeRequest{
+			AttributePath:           path.Root(name),
+			AttributePathExpression: path.MatchRoot(name),
+			Config:                  req.Config,
 		}
-		attributeResp := &tfsdk.ValidateAttributeResponse{
-			Diagnostics: resp.Diagnostics,
-		}
+		// Instantiate a new response for each request to prevent validators
+		// from modifying or removing diagnostics.
+		attributeResp := &ValidateAttributeResponse{}
 
 		BlockValidate(ctx, block, attributeReq, attributeResp)
 
-		resp.Diagnostics = attributeResp.Diagnostics
+		resp.Diagnostics.Append(attributeResp.Diagnostics...)
 	}
 
-	if s.DeprecationMessage != "" {
+	if s.GetDeprecationMessage() != "" {
 		resp.Diagnostics.AddWarning(
 			"Deprecated",
-			s.DeprecationMessage,
+			s.GetDeprecationMessage(),
 		)
 	}
 }
